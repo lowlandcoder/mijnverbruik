@@ -1,0 +1,18 @@
+{
+  "meter_ip": "192.168.1.10",
+  "webroot_data": "/var/www/mijnverbruik/data",
+  "tarieven": {
+    "stroom_t1_per_kwh": 0.25,
+    "stroom_t2_per_kwh": 0.28,
+    "gas_per_m3": 1.10
+  },
+  "monitoring": {
+    "actief": false,
+    "drempel_minuten": 3,
+    "smtp_host": "smtp.voorbeeld.nl",
+    "smtp_poort": 587,
+    "smtp_gebruiker": "naam@voorbeeld.nl",
+    "smtp_wachtwoord": "VUL_HIER_HET_WACHTWOORD_IN",
+    "email_naar": "naam@voorbeeld.nl"
+  }
+}

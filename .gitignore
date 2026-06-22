@@ -1,1 +1,10 @@
+# Datamap met JSON die het script genereert
 data/
+
+# Geheimen en lokale instellingen — nooit naar GitHub
+scripts/config.json
+
+# Runtime-bestanden van het verzamelscript
+scripts/metingen.db
+scripts/collector.log
+scripts/status.json
