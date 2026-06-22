@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MijnVerbruik</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #10141a;
+      --kaart: #1a2029;
+      --rand: #2a3340;
+      --tekst: #e8ecf1;
+      --muted: #8b97a5;
+      --accent: #4dabf7;
+      --gas: #f4a261;
+      --geld: #69db7c;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--tekst);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px 14px 40px;
+    }
+    h1 { font-size: 22px; font-weight: 600; }
+    h1 em { color: var(--accent); font-style: normal; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 22px;
+    }
+    .kpi {
+      background: var(--kaart);
+      border: 1px solid var(--rand);
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+    }
+    .kpi .waarde { font-size: 26px; font-weight: 700; }
+    .kpi .label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .kpi.stroom .waarde { color: var(--accent); }
+    .kpi.gas .waarde { color: var(--gas); }
+    .kpi.geld .waarde { color: var(--geld); }
+
+    .keuze { display: flex; gap: 8px; margin-bottom: 14px; }
+    .keuze button {
+      background: var(--kaart);
+      border: 1px solid var(--rand);
+      color: var(--muted);
+      border-radius: 18px;
+      padding: 6px 16px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .keuze button.aan {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0b1622;
+      font-weight: 600;
+    }
+
+    .grafiek {
+      background: var(--kaart);
+      border: 1px solid var(--rand);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 18px;
+    }
+    .grafiek h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--muted); }
+    .grafiek .canvaswrap { position: relative; height: 260px; }
+
+    .voet { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+  <h1>Mijn<em>Verbruik</em></h1>
+  <div class="sub" id="bijgewerkt">Laden…</div>
+
+  <!-- Actuele cijfers -->
+  <div class="kpis">
+    <div class="kpi stroom"><div class="waarde" id="k-vermogen">—</div><div class="label">Actueel vermogen</div></div>
+    <div class="kpi stroom"><div class="waarde" id="k-kwh">—</div><div class="label">Vandaag stroom</div></div>
+    <div class="kpi gas"><div class="waarde" id="k-gas">—</div><div class="label">Vandaag gas</div></div>
+    <div class="kpi geld"><div class="waarde" id="k-kosten">—</div><div class="label">Vandaag kosten</div></div>
+  </div>
+
+  <!-- Keuze: stroom / gas / kosten -->
+  <div class="keuze">
+    <button class="aan" data-m="kwh" onclick="kies(this)">⚡ Stroom</button>
+    <button data-m="gas_m3" onclick="kies(this)">🔥 Gas</button>
+    <button data-m="kosten" onclick="kies(this)">€ Kosten</button>
+  </div>
+
+  <div class="grafiek">
+    <h2>Laatste 24 uur</h2>
+    <div class="canvaswrap"><canvas id="cUren"></canvas></div>
+  </div>
+
+  <div class="grafiek">
+    <h2>Per dag (laatste 31 dagen)</h2>
+    <div class="canvaswrap"><canvas id="cDagen"></canvas></div>
+  </div>
+
+  <div class="grafiek">
+    <h2>Per maand</h2>
+    <div class="canvaswrap"><canvas id="cMaanden"></canvas></div>
+  </div>
+
+  <div class="voet">Gegevens worden elke minuut ververst · MijnVerbruik</div>
+
+<script>
+const METRIEK = {
+  kwh:    { label: 'Stroom (kWh)', kleur: '#4dabf7', eenheid: ' kWh' },
+  gas_m3: { label: 'Gas (m³)',     kleur: '#f4a261', eenheid: ' m³'  },
+  kosten: { label: 'Kosten (€)',   kleur: '#69db7c', eenheid: ''     },
+};
+
+let metriek = 'kwh';
+let uren = [], dagen = [], maanden = [];
+let chartUren = null, chartDagen = null, chartMaanden = null;
+
+/* ── Data ophalen ── */
+async function laadJson(naam) {
+  const r = await fetch('data/' + naam + '?t=' + Date.now());
+  if (!r.ok) throw new Error(naam + ' niet gevonden');
+  return r.json();
+}
+
+async function laadActueel() {
+  try {
+    const a = await laadJson('actueel.json');
+    document.getElementById('k-vermogen').textContent = a.vermogen_w + ' W';
+    document.getElementById('k-kwh').textContent      = a.vandaag.kwh.toFixed(1) + ' kWh';
+    document.getElementById('k-gas').textContent      = a.vandaag.gas_m3.toFixed(2) + ' m³';
+    document.getElementById('k-kosten').textContent   = '€ ' + a.vandaag.kosten.toFixed(2);
+    const el = document.getElementById('bijgewerkt');
+    const leeftijdMin = (Date.now() - new Date(a.tijd.replace(' ', 'T'))) / 60000;
+    if (leeftijdMin > 5) {
+      el.textContent = '⚠ Geen recente data — laatste meting: ' + a.tijd;
+      el.style.color = '#f4a261';
+    } else {
+      el.textContent = 'Bijgewerkt: ' + a.tijd;
+      el.style.color = '';
+    }
+  } catch (e) {
+    document.getElementById('bijgewerkt').textContent = 'Geen data beschikbaar — draait het verzamelscript al?';
+  }
+}
+
+async function laadHistorie() {
+  try {
+    [uren, dagen, maanden] = await Promise.all([
+      laadJson('uren.json'),
+      laadJson('dagen.json'),
+      laadJson('maanden.json'),
+    ]);
+    tekenGrafieken();
+  } catch (e) { /* actueel.json-melding volstaat */ }
+}
+
+/* ── Grafieken ── */
+function maakChart(canvasId, items, labelFormat) {
+  const m = METRIEK[metriek];
+  const ctx = document.getElementById(canvasId);
+  return new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: items.map(labelFormat),
+      datasets: [{
+        label: m.label,
+        data: items.map(x => x[metriek]),
+        backgroundColor: m.kleur,
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const x = items[c.dataIndex];
+              return [
+                ' Stroom: ' + x.kwh.toFixed(1) + ' kWh',
+                ' Gas: ' + x.gas_m3.toFixed(2) + ' m³',
+                ' Kosten: € ' + x.kosten.toFixed(2),
+              ];
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8b97a5', maxRotation: 45 }, grid: { display: false } },
+        y: {
+          ticks: { color: '#8b97a5', callback: v => (metriek === 'kosten' ? '€ ' + v : v) },
+          grid: { color: '#2a3340' },
+          beginAtZero: true,
+        },
+      },
+    },
+  });
+}
+
+function tekenGrafieken() {
+  if (chartUren)   chartUren.destroy();
+  if (chartDagen)  chartDagen.destroy();
+  if (chartMaanden) chartMaanden.destroy();
+  const maandNamen = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  // 24-uursoverzicht: label = "14:00"
+  chartUren = maakChart('cUren', uren,
+    u => u.periode.slice(11, 13) + ':00');
+  chartDagen = maakChart('cDagen', dagen,
+    d => d.periode.slice(8) + '-' + d.periode.slice(5, 7));
+  chartMaanden = maakChart('cMaanden', maanden,
+    m => maandNamen[parseInt(m.periode.slice(5, 7), 10) - 1] + ' ' + m.periode.slice(2, 4));
+}
+
+function kies(knop) {
+  document.querySelectorAll('.keuze button').forEach(b => b.classList.remove('aan'));
+  knop.classList.add('aan');
+  metriek = knop.dataset.m;
+  tekenGrafieken();
+}
+
+/* ── Start + automatisch verversen ── */
+laadActueel();
+laadHistorie();
+setInterval(laadActueel, 60 * 1000);
+setInterval(laadHistorie, 5 * 60 * 1000);
+</script>
+</body>
+</html>
