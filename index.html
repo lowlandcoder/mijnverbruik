@@ -3,52 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#061225">
   <title>MijnVerbruik</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="huisstijl.css">
   <style>
-    :root {
-      --bg: #10141a;
-      --kaart: #1a2029;
-      --rand: #2a3340;
-      --tekst: #e8ecf1;
-      --muted: #8b97a5;
-      --accent: #4dabf7;
-      --gas: #f4a261;
-      --geld: #69db7c;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--tekst);
-      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 20px 14px 40px;
-    }
-    h1 { font-size: 22px; font-weight: 600; }
-    h1 em { color: var(--accent); font-style: normal; }
-    .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
-
+    /* Alleen voor deze pagina; basis komt uit huisstijl.css */
     .kpis {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 10px;
+      gap: 12px;
       margin-bottom: 22px;
     }
-    .kpi {
-      background: var(--kaart);
-      border: 1px solid var(--rand);
-      border-radius: 10px;
-      padding: 14px;
-      text-align: center;
-    }
+    .kpi { padding: 16px; text-align: center; }
     .kpi .waarde { font-size: 26px; font-weight: 700; }
     .kpi .label { font-size: 12px; color: var(--muted); margin-top: 2px; }
     .kpi.stroom .waarde { color: var(--accent); }
     .kpi.gas .waarde { color: var(--gas); }
     .kpi.geld .waarde { color: var(--geld); }
 
-    .keuze { display: flex; gap: 8px; margin-bottom: 14px; }
+    .keuze { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
     .keuze button {
       background: var(--kaart);
       border: 1px solid var(--rand);
@@ -61,17 +35,11 @@
     .keuze button.aan {
       background: var(--accent);
       border-color: var(--accent);
-      color: #0b1622;
+      color: #07152b;
       font-weight: 600;
     }
 
-    .grafiek {
-      background: var(--kaart);
-      border: 1px solid var(--rand);
-      border-radius: 10px;
-      padding: 16px;
-      margin-bottom: 18px;
-    }
+    .grafiek { margin-bottom: 18px; }
     .grafiek h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--muted); }
     .grafiek .canvaswrap { position: relative; height: 260px; }
 
@@ -80,40 +48,44 @@
 </head>
 <body>
 
-  <h1>Mijn<em>Verbruik</em></h1>
-  <div class="sub" id="bijgewerkt">Laden…</div>
+  <main class="app">
 
-  <!-- Actuele cijfers -->
-  <div class="kpis">
-    <div class="kpi stroom"><div class="waarde" id="k-vermogen">—</div><div class="label">Actueel vermogen</div></div>
-    <div class="kpi stroom"><div class="waarde" id="k-kwh">—</div><div class="label">Vandaag stroom</div></div>
-    <div class="kpi gas"><div class="waarde" id="k-gas">—</div><div class="label">Vandaag gas</div></div>
-    <div class="kpi geld"><div class="waarde" id="k-kosten">—</div><div class="label">Vandaag kosten</div></div>
-  </div>
+    <h1 class="merk">Mijn<em>Verbruik</em></h1>
+    <div class="merk-sub" id="bijgewerkt">Laden…</div>
 
-  <!-- Keuze: stroom / gas / kosten -->
-  <div class="keuze">
-    <button class="aan" data-m="kwh" onclick="kies(this)">⚡ Stroom</button>
-    <button data-m="gas_m3" onclick="kies(this)">🔥 Gas</button>
-    <button data-m="kosten" onclick="kies(this)">€ Kosten</button>
-  </div>
+    <!-- Actuele cijfers -->
+    <div class="kpis">
+      <div class="kaart kpi stroom"><div class="waarde" id="k-vermogen">—</div><div class="label">Actueel vermogen</div></div>
+      <div class="kaart kpi stroom"><div class="waarde" id="k-kwh">—</div><div class="label">Vandaag stroom</div></div>
+      <div class="kaart kpi gas"><div class="waarde" id="k-gas">—</div><div class="label">Vandaag gas</div></div>
+      <div class="kaart kpi geld"><div class="waarde" id="k-kosten">—</div><div class="label">Vandaag kosten</div></div>
+    </div>
 
-  <div class="grafiek">
-    <h2>Laatste 24 uur</h2>
-    <div class="canvaswrap"><canvas id="cUren"></canvas></div>
-  </div>
+    <!-- Keuze: stroom / gas / kosten -->
+    <div class="keuze">
+      <button class="aan" data-m="kwh" onclick="kies(this)">⚡ Stroom</button>
+      <button data-m="gas_m3" onclick="kies(this)">🔥 Gas</button>
+      <button data-m="kosten" onclick="kies(this)">€ Kosten</button>
+    </div>
 
-  <div class="grafiek">
-    <h2>Per dag (laatste 31 dagen)</h2>
-    <div class="canvaswrap"><canvas id="cDagen"></canvas></div>
-  </div>
+    <div class="kaart grafiek">
+      <h2>Laatste 24 uur</h2>
+      <div class="canvaswrap"><canvas id="cUren"></canvas></div>
+    </div>
 
-  <div class="grafiek">
-    <h2>Per maand</h2>
-    <div class="canvaswrap"><canvas id="cMaanden"></canvas></div>
-  </div>
+    <div class="kaart grafiek">
+      <h2>Per dag (laatste 31 dagen)</h2>
+      <div class="canvaswrap"><canvas id="cDagen"></canvas></div>
+    </div>
 
-  <div class="voet">Gegevens worden elke minuut ververst · MijnVerbruik</div>
+    <div class="kaart grafiek">
+      <h2>Per maand</h2>
+      <div class="canvaswrap"><canvas id="cMaanden"></canvas></div>
+    </div>
+
+    <div class="voet">Gegevens worden elke minuut ververst · MijnVerbruik</div>
+
+  </main>
 
 <script>
 const METRIEK = {
@@ -121,6 +93,10 @@ const METRIEK = {
   gas_m3: { label: 'Gas (m³)',     kleur: '#f4a261', eenheid: ' m³'  },
   kosten: { label: 'Kosten (€)',   kleur: '#69db7c', eenheid: ''     },
 };
+
+/* Kleuren voor de assen, passend bij de huisstijl */
+const TICK_KLEUR = '#9db0c9';
+const RASTER_KLEUR = 'rgba(255,255,255,.08)';
 
 let metriek = 'kwh';
 let uren = [], dagen = [], maanden = [];
@@ -144,7 +120,7 @@ async function laadActueel() {
     const leeftijdMin = (Date.now() - new Date(a.tijd.replace(' ', 'T'))) / 60000;
     if (leeftijdMin > 5) {
       el.textContent = '⚠ Geen recente data — laatste meting: ' + a.tijd;
-      el.style.color = '#f4a261';
+      el.style.color = 'var(--gas)';
     } else {
       el.textContent = 'Bijgewerkt: ' + a.tijd;
       el.style.color = '';
@@ -199,10 +175,10 @@ function maakChart(canvasId, items, labelFormat) {
         },
       },
       scales: {
-        x: { ticks: { color: '#8b97a5', maxRotation: 45 }, grid: { display: false } },
+        x: { ticks: { color: TICK_KLEUR, maxRotation: 45 }, grid: { display: false } },
         y: {
-          ticks: { color: '#8b97a5', callback: v => (metriek === 'kosten' ? '€ ' + v : v) },
-          grid: { color: '#2a3340' },
+          ticks: { color: TICK_KLEUR, callback: v => (metriek === 'kosten' ? '€ ' + v : v) },
+          grid: { color: RASTER_KLEUR },
           beginAtZero: true,
         },
       },
