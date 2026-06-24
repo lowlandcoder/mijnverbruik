@@ -33,6 +33,40 @@ Het script draait elke minuut. De cron-regel op de server:
 3. `config.json` bevat geheimen en staat daarom in `.gitignore`; dit bestand
    hoort nooit op GitHub.
 
+## Publiceren (bijwerken op de server)
+
+Wijzigingen staan eerst op GitHub. De server haalt ze op uit een aparte kopie
+van de repository en kopieert de juiste bestanden naar hun plek. Dit is nodig
+omdat de bestanden op de server op twee plekken staan, met een andere indeling
+dan de repository: de website in `/var/www/mijnverbruik/` en het verzamelscript
+als `/opt/mijnverbruik/collector.py`.
+
+Eenmalige opzet (al gedaan):
+
+- repository als bron op de server: `~/mijnverbruik-repo`
+  (`git clone https://github.com/lowlandcoder/mijnverbruik.git ~/mijnverbruik-repo`);
+- publicatiescript: `~/publiceer-mijnverbruik.sh`.
+
+Een wijziging publiceren:
+
+1. de wijziging lokaal vastleggen en naar GitHub pushen (`git push origin main`);
+2. op de server `~/publiceer-mijnverbruik.sh` uitvoeren.
+
+Het script doet een `git pull`, kopieert `index.html` en `huisstijl.css` naar
+`/var/www/mijnverbruik/` en `scripts/collector.py` naar
+`/opt/mijnverbruik/collector.py`. De instellingen (`config.json`) en de map
+`data/` blijven ongemoeid. De inhoud van het script:
+
+```bash
+#!/bin/bash
+set -e
+cd ~/mijnverbruik-repo
+git pull origin main
+cp index.html huisstijl.css /var/www/mijnverbruik/
+sudo cp scripts/collector.py /opt/mijnverbruik/collector.py
+echo "Gepubliceerd: website en verzamelscript bijgewerkt."
+```
+
 ## Wat niet in GitHub staat
 
 - `scripts/config.json` (bevat het wachtwoord en het meter-IP).
