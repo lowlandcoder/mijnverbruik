@@ -63,6 +63,19 @@ def sla_op(db, d):
     db.commit()
 
 
+def huidig_stroomtarief():
+    """Geeft het nu geldende stroomtarief (euro per kWh).
+
+    Het daltarief geldt op werkdagen tussen 23:00 en 07:00 en het hele
+    weekend; in de overige uren geldt het normaaltarief.
+    """
+    t = CONFIG["tarieven"]
+    nu = datetime.now()
+    weekend = nu.weekday() >= 5
+    daluur = nu.hour >= 23 or nu.hour < 7
+    return t["stroom_t1_per_kwh"] if (weekend or daluur) else t["stroom_t2_per_kwh"]
+
+
 def kosten(t1_kwh, t2_kwh, gas_m3):
     """Rekent verbruik om naar euro's volgens de tarieven in config.json."""
     t = CONFIG["tarieven"]
@@ -143,6 +156,7 @@ def schrijf_json(db, d):
     actueel = {
         "tijd": f"{datetime.now():%Y-%m-%d %H:%M}",
         "vermogen_w": d.get("active_power_w"),
+        "stroom_per_kwh": huidig_stroomtarief(),
         "vandaag": vandaag,
         "standen": {
             "stroom_t1_kwh": d.get("total_power_import_t1_kwh"),

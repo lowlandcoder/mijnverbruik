@@ -22,6 +22,14 @@
     .kpi.gas .waarde { color: var(--gas); }
     .kpi.geld .waarde { color: var(--geld); }
 
+    .kpi.kosten-nu { text-align: left; }
+    .kpi.kosten-nu .waarde { font-size: 22px; text-align: center; }
+    .kpi.kosten-nu .label { text-align: center; }
+    .kpi .proj { margin-top: 12px; display: grid; gap: 4px; font-size: 12px; }
+    .kpi .proj div { display: flex; justify-content: space-between; }
+    .kpi .proj span:first-child { color: var(--muted); }
+    .kpi .proj span:last-child { font-weight: 600; }
+
     .keuze { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
     .keuze button {
       background: var(--kaart);
@@ -56,6 +64,11 @@
     <!-- Actuele cijfers -->
     <div class="kpis">
       <div class="kaart kpi stroom"><div class="waarde" id="k-vermogen">—</div><div class="label">Actueel vermogen</div></div>
+      <div class="kaart kpi geld kosten-nu">
+        <div class="waarde" id="k-kostenuur">—</div>
+        <div class="label">Kosten bij huidig vermogen</div>
+        <div class="proj" id="k-kostenproj"></div>
+      </div>
       <div class="kaart kpi stroom"><div class="waarde" id="k-kwh">—</div><div class="label">Vandaag stroom</div></div>
       <div class="kaart kpi gas"><div class="waarde" id="k-gas">—</div><div class="label">Vandaag gas</div></div>
       <div class="kaart kpi geld"><div class="waarde" id="k-kosten">—</div><div class="label">Vandaag kosten</div></div>
@@ -109,10 +122,39 @@ async function laadJson(naam) {
   return r.json();
 }
 
+/* Rekent het actuele vermogen om naar kosten per uur/dag/week/maand/jaar.
+   Aanname: het vermogen blijft constant. Bij teruglevering (negatief
+   vermogen) levert het geld op en wordt het bedrag negatief getoond. */
+const EURO = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
+
+function toonKosten(vermogenW, prijs) {
+  const hoofd = document.getElementById('k-kostenuur');
+  const proj  = document.getElementById('k-kostenproj');
+  if (vermogenW == null || prijs == null) {
+    hoofd.textContent = '—';
+    proj.innerHTML = '';
+    return;
+  }
+  const perUur  = (vermogenW / 1000) * prijs;
+  const perDag  = perUur * 24;
+  const perWeek = perDag * 7;
+  const perMaand = perDag * 365 / 12;
+  const perJaar = perDag * 365;
+  hoofd.textContent = EURO.format(perUur) + ' /uur';
+  const rij = (naam, bedrag) =>
+    '<div><span>' + naam + '</span><span>' + EURO.format(bedrag) + '</span></div>';
+  proj.innerHTML =
+    rij('Dag',   perDag) +
+    rij('Week',  perWeek) +
+    rij('Maand', perMaand) +
+    rij('Jaar',  perJaar);
+}
+
 async function laadActueel() {
   try {
     const a = await laadJson('actueel.json');
     document.getElementById('k-vermogen').textContent = a.vermogen_w + ' W';
+    toonKosten(a.vermogen_w, a.stroom_per_kwh);
     document.getElementById('k-kwh').textContent      = a.vandaag.kwh.toFixed(1) + ' kWh';
     document.getElementById('k-gas').textContent      = a.vandaag.gas_m3.toFixed(2) + ' m³';
     document.getElementById('k-kosten').textContent   = '€ ' + a.vandaag.kosten.toFixed(2);
