@@ -1,0 +1,9 @@
+[Unit]
+Description=Meetgegevens van de P1-meter verzamelen
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=peter
+WorkingDirectory=/home/peter
+ExecStart=/usr/bin/python3 /opt/mijnverbruik/collector.py

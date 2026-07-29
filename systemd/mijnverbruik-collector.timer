@@ -1,0 +1,10 @@
+[Unit]
+Description=Elke minuut meetgegevens verzamelen
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

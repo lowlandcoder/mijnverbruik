@@ -16,13 +16,27 @@ De pagina toont de actuele cijfers en grafieken per uur, per dag en per maand.
 netwerk, slaat de meting op in een SQLite-database (`metingen.db`) en schrijft
 de JSON-bestanden die de pagina toont. De pagina haalt die JSON elke minuut op.
 
-## Planning (cron)
+## Planning (systemd-timer)
 
-Het script draait elke minuut. De cron-regel op de server:
+Het script draait elke minuut via een systemd-timer. De bestanden staan in
+`systemd/` en horen op de server in `/etc/systemd/system/`.
 
+```bash
+sudo cp systemd/mijnverbruik-collector.* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mijnverbruik-collector.timer
 ```
-* * * * * /usr/bin/python3 /opt/mijnverbruik/collector.py
+
+Stand en uitvoer bekijken:
+
+```bash
+systemctl list-timers mijnverbruik-collector.timer
+journalctl -u mijnverbruik-collector.service --since "-1 h"
 ```
+
+Tot 29 juli 2026 liep dit via cron (`* * * * * /usr/bin/python3
+/opt/mijnverbruik/collector.py`). Die regel staat op de server uitgeschakeld in
+de crontab van peter en kan weg zodra de timer zich bewezen heeft.
 
 ## Instellen
 
