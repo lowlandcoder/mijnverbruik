@@ -18,9 +18,10 @@ from pathlib import Path
 
 BASIS = Path(__file__).resolve().parent
 CONFIG = json.loads((BASIS / "config.json").read_text())
-DB_PAD = BASIS / "metingen.db"
-LOG_PAD = BASIS / "collector.log"
-STATUS_PAD = BASIS / "status.json"
+GEGEVENS = Path(CONFIG.get("gegevensmap", BASIS))
+DB_PAD = GEGEVENS / "metingen.db"
+LOG_PAD = GEGEVENS / "collector.log"
+STATUS_PAD = GEGEVENS / "status.json"
 
 
 def log(melding):

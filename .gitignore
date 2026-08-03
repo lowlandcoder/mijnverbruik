@@ -8,3 +8,4 @@ scripts/config.json
 scripts/metingen.db
 scripts/collector.log
 scripts/status.json
+__pycache__/
