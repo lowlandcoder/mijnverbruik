@@ -12,7 +12,7 @@ import smtplib
 import sqlite3
 import sys
 import urllib.request
-from datetime import datetime, date
+from datetime import datetime, date, time, timedelta
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -88,71 +88,208 @@ def kosten(t1_kwh, t2_kwh, gas_m3):
     return round(bedrag, 2)
 
 
-def periodes(db, formaat, aantal):
-    """Verbruik per dag ('%Y-%m-%d') of per maand ('%Y-%m').
+# ── Verbruik per periode ────────────────────────────
+#
+# Verbruik in een periode is de meterstand aan het einde min de
+# meterstand aan het begin. De stand op een grens is de laatst
+# bekende meting op of voor dat moment. Periodes sluiten zo op
+# elkaar aan; er gaat niets verloren tussen twee periodes.
+#
+# Valt de meting langer uit, dan hoort al het verbruik van dat gat
+# volgens die regel bij de eerste meting daarna. Dat zou een valse
+# piek geven. Een gat langer dan de drempel wordt daarom naar rato
+# van de tijd verdeeld over de periodes die het raakt, en apart
+# geteld als schatting. De som blijft gelijk aan het gemeten
+# verschil in meterstand, dus dag-, maand- en jaartotalen kloppen.
 
-    Het verbruik per periode is het verschil tussen de hoogste en
-    laagste meterstand binnen die periode.
+
+def meting_op_of_voor(db, ts):
+    return db.execute(
+        "SELECT ts, import_t1, import_t2, gas_m3 FROM metingen "
+        "WHERE ts <= ? ORDER BY ts DESC LIMIT 1", (int(ts),)
+    ).fetchone()
+
+
+def meting_op_of_na(db, ts):
+    return db.execute(
+        "SELECT ts, import_t1, import_t2, gas_m3 FROM metingen "
+        "WHERE ts >= ? ORDER BY ts ASC LIMIT 1", (int(ts),)
+    ).fetchone()
+
+
+def eerste_meting_ts(db):
+    rij = db.execute("SELECT MIN(ts) FROM metingen").fetchone()
+    return rij[0]
+
+
+def verschil(begin, eind):
+    """Verschil tussen twee metingen per veld (t1, t2, gas).
+
+    Een negatief verschil kan niet: dat wijst op een vervangen meter
+    of op een ontbrekende waarde. Die telt als nul.
     """
-    rijen = db.execute(f"""
-        SELECT strftime('{formaat}', ts, 'unixepoch', 'localtime') AS periode,
-               MAX(import_t1) - MIN(import_t1),
-               MAX(import_t2) - MIN(import_t2),
-               MAX(gas_m3)    - MIN(gas_m3)
-        FROM metingen
-        GROUP BY periode
-        ORDER BY periode DESC
-        LIMIT {int(aantal)}
-    """).fetchall()
+    if begin is None or eind is None:
+        return [0.0, 0.0, 0.0]
+    uit = []
+    for i in (1, 2, 3):
+        a, b = begin[i], eind[i]
+        uit.append(b - a if a is not None and b is not None and b > a else 0.0)
+    return uit
+
+
+def verbruik_reeks(db, grenzen, labels, drempel_s):
+    """Verbruik per periode tussen opeenvolgende grenzen (unix-tijd)."""
+    nu = int(datetime.now().timestamp())
+    eerste = eerste_meting_ts(db)
+
+    voor = [meting_op_of_voor(db, g) for g in grenzen]
+    na = [meting_op_of_na(db, g) for g in grenzen]
+
+    reeks = []
+    for i, label in enumerate(labels):
+        # Is er geen meting van voor de grens, dan is de eerste meting
+        # daarna het beginpunt. Wat daarvoor is verbruikt, is onbekend.
+        begin_stand = voor[i] if voor[i] is not None else na[i]
+        t1, t2, gas = verschil(begin_stand, voor[i + 1])
+        begin_meting = na[i]
+        reeks.append({
+            "periode": label,
+            "begin": grenzen[i],
+            "eind": grenzen[i + 1],
+            "t1": t1, "t2": t2, "gas": gas,
+            "g_t1": 0.0, "g_t2": 0.0, "g_gas": 0.0,
+            "gemeten": begin_meting is not None
+                       and begin_meting[0] < grenzen[i + 1],
+            "toekomst": grenzen[i] > nu,
+        })
+
+    # Lange gaten opsporen: op elke grens de laatste meting ervoor en
+    # de eerste erna vergelijken. Hetzelfde gat kan meer grenzen raken,
+    # daarom een verzameling op begin- en eindtijd.
+    gaten = {}
+    for a, b in zip(voor, na):
+        if a is None or b is None or b[0] - a[0] <= drempel_s:
+            continue
+        gaten[(a[0], b[0])] = (a, b)
+
+    for (t_begin, t_eind), (a, b) in gaten.items():
+        duur = t_eind - t_begin
+        deel = verschil(a, b)
+        # De regel hierboven legt dit hele verbruik in de periode die als
+        # eerste eindigt op of na de eerste meting na het gat. Daar eerst
+        # weghalen. Let op de grenzen: eindigt het gat precies op een
+        # periodegrens, dan hoort het bij de periode ervoor.
+        for p in reeks:
+            if p["begin"] < t_eind <= p["eind"]:
+                p["t1"] -= deel[0]
+                p["t2"] -= deel[1]
+                p["gas"] -= deel[2]
+                break
+        # En daarna naar rato van de tijd terugleggen.
+        for p in reeks:
+            overlap = min(p["eind"], t_eind) - max(p["begin"], t_begin)
+            if overlap <= 0:
+                continue
+            aandeel = overlap / duur
+            for veld, geschat, waarde in (("t1", "g_t1", deel[0]),
+                                          ("t2", "g_t2", deel[1]),
+                                          ("gas", "g_gas", deel[2])):
+                p[veld] += waarde * aandeel
+                p[geschat] += waarde * aandeel
 
     uit = []
-    for periode, t1, t2, gas in reversed(rijen):
-        t1, t2, gas = t1 or 0, t2 or 0, gas or 0
+    for p in reeks:
+        if eerste is not None and p["eind"] <= eerste and not uit:
+            continue          # periode van voor de eerste meting ooit
+        if p["toekomst"]:
+            uit.append({"periode": p["periode"], "kwh": None, "gas_m3": None,
+                        "kosten": None, "geschat_kwh": 0, "geschat_gas_m3": 0,
+                        "gemeten": False, "toekomst": True})
+            continue
+        t1, t2, gas = max(p["t1"], 0.0), max(p["t2"], 0.0), max(p["gas"], 0.0)
         uit.append({
-            "periode": periode,
+            "periode": p["periode"],
             "kwh": round(t1 + t2, 3),
             "gas_m3": round(gas, 3),
             "kosten": kosten(t1, t2, gas),
+            "geschat_kwh": round(p["g_t1"] + p["g_t2"], 3),
+            "geschat_gas_m3": round(p["g_gas"], 3),
+            "gemeten": p["gemeten"],
+            "toekomst": False,
         })
     return uit
 
 
-def uren_24(db):
-    """Verbruik per uur voor de laatste 24 uur."""
-    rijen = db.execute("""
-        SELECT strftime('%Y-%m-%d %H', ts, 'unixepoch', 'localtime') AS uur,
-               MAX(import_t1) - MIN(import_t1),
-               MAX(import_t2) - MIN(import_t2),
-               MAX(gas_m3)    - MIN(gas_m3)
-        FROM metingen
-        WHERE ts >= strftime('%s', 'now', '-24 hours')
-        GROUP BY uur
-        ORDER BY uur
-    """).fetchall()
+# ── Grenzen van uren, dagen en maanden ──────────────────
+#
+# De grenzen komen uit de lokale klok. Op de dagen dat de klok
+# verspringt heeft een dag 23 of 25 uur; het aantal staven volgt
+# dat vanzelf, want er wordt in stappen van een uur echte tijd van
+# middernacht naar middernacht gelopen.
 
-    uit = []
-    for uur, t1, t2, gas in rijen:
-        t1, t2, gas = t1 or 0, t2 or 0, gas or 0
-        uit.append({
-            "periode": uur,
-            "kwh": round(t1 + t2, 3),
-            "gas_m3": round(gas, 3),
-            "kosten": kosten(t1, t2, gas),
-        })
-    return uit
+
+def middernacht(dag):
+    return int(datetime.combine(dag, time.min).timestamp())
+
+
+def grenzen_dag(dag):
+    """Uurgrenzen van een kalenderdag."""
+    start, eind = middernacht(dag), middernacht(dag + timedelta(days=1))
+    grenzen, labels, t = [start], [], start
+    while t < eind:
+        labels.append(datetime.fromtimestamp(t).strftime("%H:%M"))
+        t = min(t + 3600, eind)
+        grenzen.append(t)
+    return grenzen, labels
+
+
+def grenzen_dagen(aantal):
+    """Daggrenzen voor de laatste dagen, vandaag als laatste."""
+    vandaag = date.today()
+    dagen = [vandaag - timedelta(days=i) for i in range(aantal - 1, -1, -1)]
+    grenzen = [middernacht(d) for d in dagen]
+    grenzen.append(middernacht(vandaag + timedelta(days=1)))
+    return grenzen, [d.isoformat() for d in dagen]
+
+
+def volgende_maand(m):
+    return date(m.year + 1, 1, 1) if m.month == 12 else date(m.year, m.month + 1, 1)
+
+
+def vorige_maand(m):
+    return date(m.year - 1, 12, 1) if m.month == 1 else date(m.year, m.month - 1, 1)
+
+
+def grenzen_maanden(aantal):
+    """Maandgrenzen voor de laatste maanden, deze maand als laatste."""
+    m = date.today().replace(day=1)
+    maanden = []
+    for _ in range(aantal):
+        maanden.append(m)
+        m = vorige_maand(m)
+    maanden.reverse()
+    grenzen = [middernacht(x) for x in maanden]
+    grenzen.append(middernacht(volgende_maand(maanden[-1])))
+    return grenzen, [x.strftime("%Y-%m") for x in maanden]
 
 
 def schrijf_json(db, d):
     map_uit = Path(CONFIG["webroot_data"])
     map_uit.mkdir(parents=True, exist_ok=True)
 
-    uren  = uren_24(db)
-    dagen = periodes(db, "%Y-%m-%d", 31)
-    maanden = periodes(db, "%Y-%m", 24)
+    drempel = int(CONFIG.get("gat_drempel_minuten", 15)) * 60
+    vandaag_datum = date.today()
 
-    vandaag = {"kwh": 0, "gas_m3": 0, "kosten": 0}
-    if dagen and dagen[-1]["periode"] == date.today().isoformat():
-        vandaag = dagen[-1]
+    g, l = grenzen_dag(vandaag_datum)
+    uren_vandaag = verbruik_reeks(db, g, l, drempel)
+    g, l = grenzen_dag(vandaag_datum - timedelta(days=1))
+    uren_gisteren = verbruik_reeks(db, g, l, drempel)
+    g, l = grenzen_dagen(31)
+    dagen = verbruik_reeks(db, g, l, drempel)
+    g, l = grenzen_maanden(24)
+    maanden = verbruik_reeks(db, g, l, drempel)
+
+    vandaag = dagen[-1] if dagen else {"kwh": 0, "gas_m3": 0, "kosten": 0}
 
     actueel = {
         "tijd": f"{datetime.now():%Y-%m-%d %H:%M}",
@@ -164,6 +301,12 @@ def schrijf_json(db, d):
             "stroom_t2_kwh": d.get("total_power_import_t2_kwh"),
             "gas_m3": d.get("total_gas_m3"),
         },
+    }
+
+    uren = {
+        "dag": vandaag_datum.isoformat(),
+        "vandaag": uren_vandaag,
+        "gisteren": uren_gisteren,
     }
 
     (map_uit / "actueel.json").write_text(json.dumps(actueel))

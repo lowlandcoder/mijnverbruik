@@ -15,5 +15,6 @@
     "smtp_wachtwoord": "VUL_HIER_HET_WACHTWOORD_IN",
     "email_naar": "naam@voorbeeld.nl"
   },
-  "gegevensmap": "/srv/ssddata/mijnverbruik"
+  "gegevensmap": "/srv/ssddata/mijnverbruik",
+  "gat_drempel_minuten": 15
 }

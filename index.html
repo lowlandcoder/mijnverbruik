@@ -51,6 +51,7 @@
     .grafiek h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--muted); }
     .grafiek .canvaswrap { position: relative; height: 260px; }
 
+    .melding { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.45; }
     .voet { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
   </style>
 </head>
@@ -82,13 +83,15 @@
     </div>
 
     <div class="kaart grafiek">
-      <h2>Laatste 24 uur</h2>
+      <h2>Vandaag per uur (gisteren als lijn erachter)</h2>
       <div class="canvaswrap"><canvas id="cUren"></canvas></div>
+      <div class="melding" id="m-uren"></div>
     </div>
 
     <div class="kaart grafiek">
       <h2>Per dag (laatste 31 dagen)</h2>
       <div class="canvaswrap"><canvas id="cDagen"></canvas></div>
+      <div class="melding" id="m-dagen"></div>
     </div>
 
     <div class="kaart grafiek">
@@ -112,7 +115,7 @@ const TICK_KLEUR = '#9db0c9';
 const RASTER_KLEUR = 'rgba(255,255,255,.08)';
 
 let metriek = 'kwh';
-let uren = [], dagen = [], maanden = [];
+let uren = [], urenGisteren = [], dagen = [], maanden = [];
 let chartUren = null, chartDagen = null, chartMaanden = null;
 
 /* ── Data ophalen ── */
@@ -155,9 +158,10 @@ async function laadActueel() {
     const a = await laadJson('actueel.json');
     document.getElementById('k-vermogen').textContent = a.vermogen_w + ' W';
     toonKosten(a.vermogen_w, a.stroom_per_kwh);
-    document.getElementById('k-kwh').textContent      = a.vandaag.kwh.toFixed(1) + ' kWh';
-    document.getElementById('k-gas').textContent      = a.vandaag.gas_m3.toFixed(2) + ' m³';
-    document.getElementById('k-kosten').textContent   = '€ ' + a.vandaag.kosten.toFixed(2);
+    const v = a.vandaag || {};
+    document.getElementById('k-kwh').textContent      = (v.kwh || 0).toFixed(1) + ' kWh';
+    document.getElementById('k-gas').textContent      = (v.gas_m3 || 0).toFixed(2) + ' m³';
+    document.getElementById('k-kosten').textContent   = '€ ' + (v.kosten || 0).toFixed(2);
     const el = document.getElementById('bijgewerkt');
     const leeftijdMin = (Date.now() - new Date(a.tijd.replace(' ', 'T'))) / 60000;
     if (leeftijdMin > 5) {
@@ -174,45 +178,86 @@ async function laadActueel() {
 
 async function laadHistorie() {
   try {
-    [uren, dagen, maanden] = await Promise.all([
+    const [u, d, m] = await Promise.all([
       laadJson('uren.json'),
       laadJson('dagen.json'),
       laadJson('maanden.json'),
     ]);
+    /* uren.json bevat een object met de uren van vandaag en van
+       gisteren. Levert de server nog de oude lijst, dan blijft de
+       pagina werken en blijft de vergelijking met gisteren leeg. */
+    uren = Array.isArray(u) ? u : (u.vandaag || []);
+    urenGisteren = Array.isArray(u) ? [] : (u.gisteren || []);
+    dagen = d;
+    maanden = m;
     tekenGrafieken();
   } catch (e) { /* actueel.json-melding volstaat */ }
 }
 
 /* ── Grafieken ── */
-function maakChart(canvasId, items, labelFormat) {
+
+/* Een periode zonder eigen metingen krijgt een grijze staaf. Het
+   verbruik daarvan is afgeleid uit het verschil in meterstand en naar
+   rato van de tijd verdeeld, dus het is een schatting. De totalen
+   kloppen wel, want de som is gelijk aan dat verschil. */
+const GRIJS = '#5c6b80';
+
+function tooltipRegels(x) {
+  if (!x || x.toekomst) return [' Nog geen gegevens'];
+  const regels = [
+    ' Stroom: ' + x.kwh.toFixed(1) + ' kWh',
+    ' Gas: ' + x.gas_m3.toFixed(2) + ' m³',
+    ' Kosten: € ' + x.kosten.toFixed(2),
+  ];
+  if (x.geschat_kwh > 0.05) {
+    regels.push(' Geschat deel: ' + x.geschat_kwh.toFixed(1) + ' kWh');
+  }
+  if (x.gemeten === false) regels.push(' Geen metingen in deze periode');
+  return regels;
+}
+
+function maakChart(canvasId, items, labelFormat, vergelijk) {
   const m = METRIEK[metriek];
-  const ctx = document.getElementById(canvasId);
-  return new Chart(ctx, {
+  const sets = [{
     type: 'bar',
-    data: {
-      labels: items.map(labelFormat),
-      datasets: [{
-        label: m.label,
-        data: items.map(x => x[metriek]),
-        backgroundColor: m.kleur,
-        borderRadius: 3,
-      }],
-    },
+    label: m.label,
+    data: items.map(x => x[metriek]),
+    backgroundColor: items.map(x =>
+      (x.gemeten === false && !x.toekomst) ? GRIJS : m.kleur),
+    borderRadius: 3,
+    order: 1,
+  }];
+
+  /* De lijn van gisteren wordt vóór de staven getekend, omdat een
+     hoger ordernummer eerder aan de beurt is. */
+  if (vergelijk && vergelijk.length) {
+    sets.push({
+      type: 'line',
+      label: 'Gisteren',
+      data: items.map((x, i) => (vergelijk[i] ? vergelijk[i][metriek] : null)),
+      borderColor: 'rgba(255,255,255,.30)',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      tension: .3,
+      spanGaps: true,
+      order: 2,
+    });
+  }
+
+  return new Chart(document.getElementById(canvasId), {
+    type: 'bar',
+    data: { labels: items.map(labelFormat), datasets: sets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (c) => {
-              const x = items[c.dataIndex];
-              return [
-                ' Stroom: ' + x.kwh.toFixed(1) + ' kWh',
-                ' Gas: ' + x.gas_m3.toFixed(2) + ' m³',
-                ' Kosten: € ' + x.kosten.toFixed(2),
-              ];
-            },
+            label: (c) => (c.datasetIndex === 0
+              ? tooltipRegels(items[c.dataIndex])
+              : (c.raw == null ? [] : [' Gisteren: ' + c.raw.toFixed(2)])),
           },
         },
       },
@@ -228,18 +273,45 @@ function maakChart(canvasId, items, labelFormat) {
   });
 }
 
+/* Zet onder de grafiek wat er is geschat, zodat een grijze staaf niet
+   voor een gemeten waarde wordt aangezien. */
+function geschatTotaal(items) {
+  return items.reduce((s, x) => s + (x.geschat_kwh || 0), 0);
+}
+
+function meldGaten(id, items, enkel, meervoud, vergelijk) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const zonder = items.filter(x => x.gemeten === false && !x.toekomst).length;
+  const kwh = geschatTotaal(items);
+  const kwhV = vergelijk ? geschatTotaal(vergelijk) : 0;
+  let tekst = '';
+  if (zonder || kwh >= 0.05) {
+    tekst = 'Grijs betekent: geen metingen. ' +
+      zonder + ' ' + (zonder === 1 ? enkel : meervoud) + ' zonder meting, ' +
+      kwh.toFixed(1) + ' kWh geschat uit het verschil in meterstand. ' +
+      'De totalen kloppen, de verdeling over de tijd is een schatting.';
+  }
+  if (kwhV >= 0.05) {
+    tekst += (tekst ? ' ' : '') + 'De lijn van gisteren bevat ' +
+      kwhV.toFixed(1) + ' kWh geschat verbruik.';
+  }
+  el.textContent = tekst;
+}
+
 function tekenGrafieken() {
   if (chartUren)   chartUren.destroy();
   if (chartDagen)  chartDagen.destroy();
   if (chartMaanden) chartMaanden.destroy();
   const maandNamen = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
-  // 24-uursoverzicht: label = "14:00"
-  chartUren = maakChart('cUren', uren,
-    u => u.periode.slice(11, 13) + ':00');
+  // Vandaag per uur, met de uren van gisteren als lijn erachter
+  chartUren = maakChart('cUren', uren, u => u.periode, urenGisteren);
   chartDagen = maakChart('cDagen', dagen,
     d => d.periode.slice(8) + '-' + d.periode.slice(5, 7));
   chartMaanden = maakChart('cMaanden', maanden,
     m => maandNamen[parseInt(m.periode.slice(5, 7), 10) - 1] + ' ' + m.periode.slice(2, 4));
+  meldGaten('m-uren', uren, 'uur', 'uren', urenGisteren);
+  meldGaten('m-dagen', dagen, 'dag', 'dagen');
 }
 
 function kies(knop) {
